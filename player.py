@@ -110,10 +110,13 @@ class Player:
         self.items.append(item)
 
     def use_item(self, item_name: str, context: Dict) -> str:
-        """Use an item by name if the player has it."""
-        for item in self.items:
+        """Use an item by name if the player has it. The item is consumed."""
+        for idx, item in enumerate(self.items):
             if item.name.lower() == item_name.lower():
-                return item.effect(self, context)
+                result = item.effect(self, context)
+                # remove item from inventory
+                self.items.pop(idx)
+                return result
         return f"You don't have a {item_name}."
 
 
@@ -122,46 +125,98 @@ class Player:
 # ---------------------------------------------------------------------------
 
 def effect_torch(player: Player, context: Dict) -> str:
-    """A torch helps you avoid traps in the temple."""
+    """A torch helps you avoid traps and can burn foes in combat."""
     if context.get("event") == "trap":
         # Avoid some damage
         return "Your torch lights the way and you carefully avoid the trap."
+
+    if context.get("event") == "combat" and isinstance(context.get("enemy"), Enemy):
+        enemy: Enemy = context["enemy"]
+        # sometimes you burn, sometimes you distract
+        if random.random() < 0.4:
+            enemy.damage = max(enemy.damage - 1, 1)
+            return f"You hurl the torch, distracting the {enemy.name} and weakening its next strike."
+        damage = random.randint(5, 10)
+        enemy.health = max(enemy.health - damage, 0)
+        if not enemy.is_alive:
+            return f"You blaze the {enemy.name} with your torch and it goes down in flames!"
+        return f"You swing the torch, burning the {enemy.name} for {damage} damage."
 
     return "You hold the torch high, lighting the dark passage."
 
 
 def effect_rope(player: Player, context: Dict) -> str:
-    """A rope can save you from falls or help you climb."""
+    """A rope can save you from falls or help you climb, and can be used in combat."""
     if context.get("event") == "pit":
         return "You toss the rope across the pit, slide down safely, and avoid falling."
 
+    if context.get("event") == "combat" and isinstance(context.get("enemy"), Enemy):
+        enemy: Enemy = context["enemy"]
+        # binding the enemy reduces its armor and damage
+        reduced = min(enemy.armor, 2)
+        enemy.armor = max(enemy.armor - reduced, 0)
+        enemy.damage = max(enemy.damage - 2, 1)
+        return (
+            f"You lasso and wrap the {enemy.name}, weakening its attacks (-{reduced} armor, -2 damage)."
+        )
+
     return "You feel secure with the rope in your pack."
-
-
 def effect_potion(player: Player, context: Dict) -> str:
-    """A potion heals the player and is consumed."""
-    # Remove the potion from inventory once used.
-    player.items = [i for i in player.items if i.name != "Healing Potion"]
-    return player.heal(30)
+    """A potion heals the player and is consumed.  In combat it also soothes wounds quickly or can be thrown."""
+    # inventory removal handled by use_item
+    if context.get("event") == "combat" and isinstance(context.get("enemy"), Enemy):
+        enemy: Enemy = context["enemy"]
+        if random.random() < 0.5:
+            # drink to heal
+            msg = player.heal(30)
+            if player.poisoned_turns > 0:
+                player.poisoned_turns = 0
+                msg += " You feel the poison fade away."
+            return msg
+        else:
+            # throw at enemy
+            damage = random.randint(8, 14)
+            enemy.health = max(enemy.health - damage, 0)
+            if not enemy.is_alive:
+                return f"You hurl the potion and shatter it on the {enemy.name}, killing it with the splash!"
+            return f"You toss the potion at the {enemy.name}, dealing {damage} damage."
+    # non-combat fallback
+    msg = player.heal(30)
+    return msg
 
 
 def effect_dagger(player: Player, context: Dict) -> str:
-    """A dagger helps against enemies."""
+    """A dagger helps against enemies with quick strikes or piercing attacks."""
     if context.get("event") == "combat" and isinstance(context.get("enemy"), Enemy):
         enemy: Enemy = context["enemy"]
+        # chance to bypass armor or land a critical strike
+        crit = random.random() < 0.2
+        piercing = random.random() < 0.25
         damage = random.randint(10, 18)
+        if crit:
+            damage = int(damage * 1.5)
+        if piercing and enemy.armor > 0:
+            taken = min(enemy.armor, 3)
+            enemy.armor = max(enemy.armor - taken, 0)
+            armor_msg = f" (pierced {taken} armor)"
+        else:
+            armor_msg = ""
         enemy.health = max(enemy.health - damage, 0)
         if not enemy.is_alive:
             return f"You strike true with your dagger and defeat the {enemy.name}!"
-        return f"You slash the {enemy.name} for {damage} damage. It has {enemy.health} HP left."
+        return f"You slash the {enemy.name} for {damage} damage{armor_msg}. It has {enemy.health} HP left."
 
     return "You keep the dagger ready, just in case."
 
 
 def effect_food_rations(player: Player, context: Dict) -> str:
-    """Food rations can restore energy mid-run."""
-    # Remove rations when used.
-    player.items = [i for i in player.items if i.name != "Food Rations"]
+    """Food rations can restore energy mid-run or distract an enemy in combat."""
+    # inventory removal handled by use_item
+    if context.get("event") == "combat" and isinstance(context.get("enemy"), Enemy):
+        enemy: Enemy = context["enemy"]
+        heal = 10
+        player.health = min(player.health + heal, 100)
+        return f"You toss rations to the {enemy.name}, confusing it and healing {heal} HP."
     player.food += 20
     return "You eat the rations and feel energized (+20 food)."
 
@@ -198,12 +253,16 @@ def build_default_items() -> List[Item]:
 
 def generate_enemy(depth: int) -> Enemy:
     """Create a randomized enemy scaled to the depth of the temple."""
+    # expand enemy variety
     choices = [
         ("Cave Snake", 20 + depth * 4, 6 + depth * 2, "poison", 0),
         ("Ancient Warrior", 28 + depth * 5, 8 + depth * 2, "shield", 3),
         ("Temple Guard", 26 + depth * 5, 7 + depth * 2, None, 1),
         ("Temple Bat", 18 + depth * 3, 5 + depth * 2, None, 0),
         ("Crypt Spider", 22 + depth * 4, 6 + depth * 2, "poison", 0),
+        ("Sand Wraith", 24 + depth * 5, 9 + depth * 2, "curse", 2),
+        ("Bone Golem", 30 + depth * 6, 10 + depth * 3, None, 4),
+        ("Mummy Lord", 32 + depth * 7, 12 + depth * 3, "poison", 2),
     ]
     name, hp, dmg, special, armor = random.choice(choices)
     return Enemy(name=name, health=hp, damage=dmg, special=special, armor=armor)
@@ -223,13 +282,19 @@ def run_combat(player: Player, enemy: Enemy) -> bool:
                 break
 
         print(f"\n-- Combat: {player.name} (HP {player.health}) vs {enemy.name} (HP {enemy.health})")
-        print("  1) Attack")
-        print("  2) Use item")
-        print("  3) Run")
-        print("  4) Check status")
-        choice = input("Choose an action (1-4): ").strip()
+        # shorter option list
+        print(" 1)Attack  2)Item  3)Run  4)Status")
+        choice = input("Choice (1-4): ").strip()
 
         if choice == "1":
+            # Describe the player's attack using items from inventory if available.
+            weapon_desc = "bare hands"
+            for it in player.items:
+                if it.name.lower() in ("dagger", "sword", "axe"):
+                    weapon_desc = it.name
+                    break
+            print(f"You attack the {enemy.name} with your {weapon_desc}!")
+
             base = random.randint(8, 14)
             crit = random.random() < 0.18
             damage = int(base * 1.5) if crit else base
@@ -271,6 +336,20 @@ def run_combat(player: Player, enemy: Enemy) -> bool:
 
         # Enemy turn
         if enemy.is_alive:
+            # Optionally call out items you have that might influence the fight.
+            if any(i.name.lower() == "torch" for i in player.items):
+                print("You brandish your torch, its light dancing as you brace for the blow.")
+            if any(i.name.lower() == "rope" for i in player.items):
+                print("You grip your rope, ready to spring aside.")
+
+            # Provide a narrative for the incoming attack.
+            if enemy.special == "poison":
+                print(f"The {enemy.name} lunges forward, its fangs dripping with venom!")
+            elif enemy.armor > 0:
+                print(f"The {enemy.name} swings a heavy blow, its armored hide gleaming.")
+            else:
+                print(f"The {enemy.name} moves to strike.")
+
             if enemy.special == "poison" and random.random() < 0.25:
                 player.poisoned_turns = max(player.poisoned_turns, 3)
                 print(f"The {enemy.name} bites you and injects poison!")
@@ -322,18 +401,14 @@ def print_header() -> None:
 
 
 def show_backstory() -> None:
-    story = (
-        "You are an explorer drawn to the fabled Temple of Time. "
-        "Legends say the temple tests those who enter with clever traps, ancient guardians, "
-        "and strange time-warping rooms."
-    )
+    story = "You enter the Temple of Time, full of traps and guardians."
     print(story)
 
 
 def choose_items(available_items: List[Item], count: int = 2) -> List[Item]:
     """Prompt the player to choose starting items."""
 
-    print("\nBefore you enter, choose two items to bring with you:")
+    print("\nPick 2 items:")
     for idx, item in enumerate(available_items, start=1):
         print(f"  {idx}. {item.name}: {item.description}")
 
@@ -363,8 +438,9 @@ def choose_items(available_items: List[Item], count: int = 2) -> List[Item]:
 def choose_room(chamber: int) -> Dict:
     """Pick a room type and description based on how deep you are in the temple."""
 
-    room_types = ["empty", "treasure", "enemy", "trap", "heal", "pit"]
-    weights = [0.35, 0.18, 0.2, 0.15, 0.06, 0.06]
+    # include a choice room where the player must pick a direction
+    room_types = ["empty", "treasure", "enemy", "trap", "heal", "pit", "choice"]
+    weights = [0.33, 0.15, 0.18, 0.14, 0.06, 0.06, 0.08]
     room_type = random.choices(room_types, weights, k=1)[0]
 
     if room_type == "enemy":
@@ -408,6 +484,14 @@ def choose_room(chamber: int) -> Dict:
             "description": f"You see a {name}, its waters shimmer with a calming light.",
             "heal": heal,
         }
+    if room_type == "choice":
+        # a branching corridor where player must decide
+        name = random.choice(["forked passage", "split corridor", "three-way junction"])
+        return {
+            "type": "choice",
+            "name": name,
+            "description": f"You reach a {name}. You can go left, right or forward.",
+        }
 
     if room_type == "treasure":
         name = random.choice(["hidden alcove", "ancient chest", "forgotten treasure room"])
@@ -442,13 +526,13 @@ def run_temple_run(player: Player) -> None:
 
         # Allow the player to decide how to proceed
         while True:
-            print("\nWhat would you like to do?")
-            print("  1) Proceed")
-            print("  2) Use an item")
-            print("  3) Eat food")
-            print("  4) Check status")
-            print("  5) Exit temple")
-            choice = input("Choose an option (1-5): ").strip().lower()
+            # show extra option when in a choice room
+            if room["type"] == "choice":
+                print("\nChoose: 1)Proceed 2)Item 3)Eat 4)Status 5)Exit 6)Go")
+                choice = input("Choice (1-6): ").strip().lower()
+            else:
+                print("\nChoose: 1)Proceed 2)Item 3)Eat 4)Status 5)Exit")
+                choice = input("Choice (1-5): ").strip().lower()
 
             if choice in ("1", "p", "proceed"):
                 break
@@ -475,8 +559,25 @@ def run_temple_run(player: Player) -> None:
                 player.take_damage(5, "Wandering in the dark")
                 print("You lose time and food as you stumble around.")
                 break
+            if room["type"] == "choice" and choice in ("6", "g", "go"):
+                # direction decision
+                dir_choice = input("Go left, right, or forward? (l/r/f): ").strip().lower()
+                if dir_choice.startswith("l"):
+                    dmg = random.randint(15, 25)
+                    print("You head left and a hidden trap triggers!")
+                    print(player.take_damage(dmg, "Deadly trap"))
+                elif dir_choice.startswith("r"):
+                    print("A cursed pharaoh appears and he utters a terrible curse!")
+                    player.poisoned_turns += 10
+                    print("You feel a sickness take hold... (poisoned)")
+                else:
+                    print("You stumble forward into a safe alcove. You may choose again.")
+                    # restart the options loop without moving on
+                    continue
+                # after resolving a bad choice, move on to next chamber automatically
+                break
 
-            print("Not a valid choice. Please enter 1-5.")
+            print(f"Not a valid choice. Please enter {'1-6' if room['type']=='choice' else '1-5' }.")
 
         if player.health <= 0:
             break
@@ -493,10 +594,14 @@ def run_temple_run(player: Player) -> None:
                 print("Your torch helped you spot the trap and you avoid it.")
             else:
                 print(player.take_damage(room["damage"], "A trap triggers!"))
+        elif room["type"] == "choice":
+            # direction choice already handled in menu; nothing extra
+            pass
 
         elif room["type"] == "enemy":
             enemy = generate_enemy(chamber)
-            enemy.name = room["name"]
+            # describe where the enemy is encountered without renaming it to a room
+            print(f"A {enemy.name} emerges from the {room['name']}!")
             if not run_combat(player, enemy):
                 break
 
