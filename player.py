@@ -85,16 +85,13 @@ class Player:
         return f"Healed {self.health - old} HP."
 
     def eat(self, amount: int) -> str:
-        """Eat food to restore a little health.
-
-        Eating also reduces food supply.
-        """
+        """Consume up to 10 food and heal 20 health per meal."""
         if self.food <= 0:
             return "You have no food to eat."
 
-        used = min(self.food, amount)
+        used = min(self.food, 10)
         self.food -= used
-        heal = used // 2
+        heal = 20
         self.health = min(self.health + heal, 100)
         return f"Ate {used} food and recovered {heal} health."
 
@@ -513,7 +510,7 @@ def choose_room(chamber: int) -> Dict:
 def run_temple_run(player: Player) -> None:
     """Run through a short series of temple chambers."""
 
-    chambers = random.randint(4, 6)
+    chambers = 15  # fixed number of challenges to reach the heart
     print(f"\nThe temple stretches ahead. You must survive {chambers} chambers to escape.")
 
     chamber = 0
@@ -660,7 +657,16 @@ def run_temple_run(player: Player) -> None:
         print(player.status())
 
     if player.health > 0 and chamber >= chambers:
-        print("\nYou exit the temple, battered but alive. The legend lives on!")
+        # reached final chamber; reward and require exit attempt
+        bonus = random.randint(2000, 5000)
+        player.money += bonus
+        print("\nYou reach the temple's heart and uncover a hoard of coins!")
+        print(f"You collect {bonus} gold – you now have {player.money} money. This could change your life.")
+        print("Now to find your way out...")
+        if attempt_exit(chamber):
+            print("\nYou exit the temple, battered but alive. The legend lives on!")
+        else:
+            print("\nYou wander the corridors and barely escape with your life!")
     elif player.health > 0:
         print("\nYou left the temple and live to come back another day.")
     else:
