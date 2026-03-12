@@ -8,6 +8,7 @@ Run this file directly to start a simple interactive demo.
 """
 
 import random
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -37,13 +38,49 @@ class Enemy:
         return self.health > 0
 
 
+# ---------------------------------------------------------------------------
+# Word list and typing minigame
+# ---------------------------------------------------------------------------
+
+COMBAT_WORDS = [
+    "strike", "slash", "thrust", "pierce", "smite", "cleave", "swiftly",
+    "warrior", "temple", "combat", "fiery", "ancient", "shadow", "lightning",
+    "roar", "charge", "defend", "courage", "battle", "victory", "dragon",
+    "phoenix", "granite", "thunderstorm", "moonlight", "crystal", "obsidian",
+    "avalanche", "earthquake", "phoenix", "horizon", "destiny", "adventure"
+]
+
+
+def print_slowly(text: str, delay: float = 0.03) -> None:
+    """Print text slowly, one character at a time, for dramatic effect."""
+    for char in text:
+        print(char, end="", flush=True)
+        time.sleep(delay)
+    print()
+
+
+def run_typing_minigame() -> int:
+    """Run a typing minigame where player types a random word to deal damage."""
+    word = random.choice(COMBAT_WORDS)
+    player_input = input(f"Type '{word}': ").strip()
+    
+    if player_input.lower() == word.lower():
+        damage = 8 + (len(word) * 2)
+        print(f"+{damage} damage!")
+        return damage
+    else:
+        damage = random.randint(4, 6)
+        print(f"+{damage} damage (wrong word)")
+        return damage
+
+
 @dataclass
 class Player:
     """A player in the "Temple Time" adventure."""
 
     name: str
     health: int = 100
-    food: int = 50
+    food: int = 100  # more starting food to survive longer
     money: int = 20
     items: List[Item] = field(default_factory=list)
     poisoned_turns: int = 0
@@ -85,16 +122,14 @@ class Player:
         return f"Healed {self.health - old} HP."
 
     def eat(self, amount: int) -> str:
-        """Consume up to 10 food and heal 20 health per meal."""
+        """Consume food to heal; heals 5 health per use and shows remaining food."""
         if self.food <= 0:
             return "You have no food to eat."
 
-        used = min(self.food, 10)
-        self.food -= used
-        heal = 20
+        self.food -= 1
+        heal = 5
         self.health = min(self.health + heal, 100)
-        return f"Ate {used} food and recovered {heal} health."
-
+        return f"Ate food (-1). Health +{heal}. Food left: {self.food}."
     def spend(self, amount: int) -> bool:
         """Spend money if available."""
         if amount > self.money:
@@ -245,21 +280,32 @@ def build_default_items() -> List[Item]:
             description="Extra food to keep you fed in the temple.",
             effect=effect_food_rations,
         ),
+        Item(
+            name="Medkit",
+            description="Heals 70 health when used.",
+            effect=lambda player, ctx: player.heal(70),
+        ),
     ]
 
 
 def generate_enemy(depth: int) -> Enemy:
     """Create a randomized enemy scaled to the depth of the temple."""
-    # expand enemy variety
+    # expand enemy variety with more original creatures
     choices = [
-        ("Cave Snake", 20 + depth * 4, 6 + depth * 2, "poison", 0),
-        ("Ancient Warrior", 28 + depth * 5, 8 + depth * 2, "shield", 3),
-        ("Temple Guard", 26 + depth * 5, 7 + depth * 2, None, 1),
-        ("Temple Bat", 18 + depth * 3, 5 + depth * 2, None, 0),
-        ("Crypt Spider", 22 + depth * 4, 6 + depth * 2, "poison", 0),
-        ("Sand Wraith", 24 + depth * 5, 9 + depth * 2, "curse", 2),
-        ("Bone Golem", 30 + depth * 6, 10 + depth * 3, None, 4),
-        ("Mummy Lord", 32 + depth * 7, 12 + depth * 3, "poison", 2),
+        ("Cave Snake", 18 + depth * 3, 2 + depth, "poison", 0),
+        ("Ancient Warrior", 28 + depth * 5, 4 + depth, "shield", 3),
+        ("Temple Guard", 22 + depth * 4, 3 + depth, None, 1),
+        ("Temple Bat", 16 + depth * 2, 2 + depth, None, 0),
+        ("Crypt Spider", 25 + depth * 4, 3 + depth, "poison", 1),
+        ("Ancient Spider Queen", 35 + depth * 6, 5 + depth, "poison", 2),
+        ("Sand Wraith", 24 + depth * 5, 4 + depth, "curse", 2),
+        ("Bone Golem", 30 + depth * 6, 5 + depth * 2, None, 4),
+        ("Mummy Lord", 32 + depth * 7, 6 + depth * 2, "poison", 2),
+        ("Venom Serpent", 20 + depth * 3, 2 + depth, "poison", 0),
+        ("Shadow Stalker", 26 + depth * 4, 4 + depth, None, 1),
+        ("Poison Scorpion", 24 + depth * 4, 3 + depth, "poison", 2),
+        ("Cursed Tomb Guardian", 28 + depth * 5, 4 + depth, "curse", 3),
+        ("Scarab Swarm", 19 + depth * 3, 3 + depth, None, 0),
     ]
     name, hp, dmg, special, armor = random.choice(choices)
     return Enemy(name=name, health=hp, damage=dmg, special=special, armor=armor)
@@ -267,101 +313,82 @@ def generate_enemy(depth: int) -> Enemy:
 
 def run_combat(player: Player, enemy: Enemy) -> bool:
     """Run a simple turn-based combat encounter."""
-
-    print(f"\nA {enemy.name} attacks! (HP: {enemy.health})")
+    print(f"{enemy.name} (HP {enemy.health})")
 
     while player.health > 0 and enemy.is_alive:
-        # Status effects first
         status_msg = player.apply_status_effects()
         if status_msg:
             print(status_msg)
             if player.health <= 0:
                 break
+        # combat action costs food each turn
+        player.food = max(player.food - 1, 0)
 
-        print(f"\n-- Combat: {player.name} (HP {player.health}) vs {enemy.name} (HP {enemy.health})")
-        # shorter option list
-        print(" 1)Attack  2)Item  3)Run  4)Status")
-        choice = input("Choice (1-4): ").strip()
+        # starvation warning
+        if player.food <= 0:
+            print("Starving! Damage reduced, eat soon.")
+        print(f"{player.name} (HP {player.health}) vs {enemy.name} (HP {enemy.health})")
+        print("1)Attack 2)Item 3)Run 4)Status")
+        choice = input("> ").strip()
 
         if choice == "1":
-            # Describe the player's attack using items from inventory if available.
-            weapon_desc = "bare hands"
-            for it in player.items:
-                if it.name.lower() in ("dagger", "sword", "axe"):
-                    weapon_desc = it.name
-                    break
-            print(f"You attack the {enemy.name} with your {weapon_desc}!")
-
-            base = random.randint(8, 14)
-            crit = random.random() < 0.18
-            damage = int(base * 1.5) if crit else base
+            damage = run_typing_minigame()
+            if player.food <= 0:
+                damage = damage // 2
             if enemy.armor > 0:
                 mitigated = min(enemy.armor, damage)
                 damage -= mitigated
-                print(f"The {enemy.name}'s armor absorbs {mitigated} damage.")
+                if mitigated > 0:
+                    print(f"Armor: -{mitigated}")
             enemy.health = max(enemy.health - damage, 0)
-            hit_word = "critical hit" if crit else "hit"
-            print(f"You {hit_word} the {enemy.name} for {damage} damage.")
-
         elif choice == "2":
             if not player.items:
-                print("You have no items to use.")
+                print("No items.")
                 continue
             print("Items:", ", ".join(i.name for i in player.items))
-            item_name = input("Which item do you want to use? ").strip()
+            item_name = input("Use: ").strip()
             if not item_name:
                 continue
             print(player.use_item(item_name, {"event": "combat", "enemy": enemy}))
             if not enemy.is_alive:
                 break
             continue
-
         elif choice == "3":
-            escape_chance = 0.5
-            if random.random() < escape_chance:
-                print(f"You break away from the {enemy.name} and flee deeper into the temple.")
+            if player.food <= 0 and random.random() < 0.3:
+                print("You collapse from starvation and die.")
+                player.health = 0
+                return False
+            if random.random() < 0.5:
+                print("Escaped!")
                 return True
-            print("You fail to escape!")
-
+            print("Failed!")
         elif choice == "4":
             print(player.status())
+            # if starving and choose status, still risk death
+            if player.food <= 0 and random.random() < 0.3:
+                print("You starve while lost and die.")
+                player.health = 0
+                return False
             continue
-
         else:
-            print("Not a valid choice. Please enter 1-4.")
+            print("Invalid.")
             continue
 
-        # Enemy turn
         if enemy.is_alive:
-            # Optionally call out items you have that might influence the fight.
-            if any(i.name.lower() == "torch" for i in player.items):
-                print("You brandish your torch, its light dancing as you brace for the blow.")
-            if any(i.name.lower() == "rope" for i in player.items):
-                print("You grip your rope, ready to spring aside.")
-
-            # Provide a narrative for the incoming attack.
-            if enemy.special == "poison":
-                print(f"The {enemy.name} lunges forward, its fangs dripping with venom!")
-            elif enemy.armor > 0:
-                print(f"The {enemy.name} swings a heavy blow, its armored hide gleaming.")
-            else:
-                print(f"The {enemy.name} moves to strike.")
-
             if enemy.special == "poison" and random.random() < 0.25:
                 player.poisoned_turns = max(player.poisoned_turns, 3)
-                print(f"The {enemy.name} bites you and injects poison!")
-
-            if random.random() < 0.2:
-                print(f"You dodge the {enemy.name}'s attack!")
+                print(f"{enemy.name} poisons!")
+            elif random.random() < 0.2:
+                print("Dodged!")
             else:
-                enemy_damage = random.randint(max(enemy.damage - 2, 1), enemy.damage + 2)
-                print(player.take_damage(enemy_damage, f"The {enemy.name} attacks!"))
+                enemy_damage = random.randint(max(enemy.damage - 1, 1), enemy.damage + 1)
+                print(player.take_damage(enemy_damage, f"{enemy.name}"))
 
     if player.health <= 0:
-        print("You fall to the floor, defeated by your foe.")
+        print("Defeated.")
         return False
 
-    print(f"You have defeated the {enemy.name}.")
+    print(f"{enemy.name} defeated!")
     return True
 
 
@@ -399,7 +426,9 @@ def print_header() -> None:
 
 def show_backstory() -> None:
     story = "You enter the Temple of Time, full of traps and guardians."
-    print(story)
+    print_slowly(story, delay=0.05)
+    print("\nWARNING: When you encounter enemies, you must type random words to")
+    print("deal damage. Longer words deal more damage. Type carefully!\n")
 
 
 def choose_items(available_items: List[Item], count: int = 2) -> List[Item]:
@@ -511,70 +540,75 @@ def run_temple_run(player: Player) -> None:
     """Run through a short series of temple chambers."""
 
     chambers = 15  # fixed number of challenges to reach the heart
-    print(f"\nThe temple stretches ahead. You must survive {chambers} chambers to escape.")
+    print(f"The temple stretches ahead. Survive {chambers} chambers to escape.")
 
     chamber = 0
     while chamber < chambers and player.health > 0:
         chamber += 1
         room = choose_room(chamber)
 
-        print(f"\n--- Chamber {chamber} ---")
-        print(room["description"])
+        print(f"Chamber {chamber}: {room['description']}")
+        # starting each chamber, food drains a bit quicker later per action
 
         # Allow the player to decide how to proceed
         while True:
-            # show extra option when in a choice room
+            # each decision costs food
+            player.food = max(player.food - 1, 0)
+            # Choice room: only show direction options
             if room["type"] == "choice":
-                print("\nChoose: 1)Proceed 2)Item 3)Eat 4)Status 5)Exit 6)Go")
-                choice = input("Choice (1-6): ").strip().lower()
-            else:
-                print("\nChoose: 1)Proceed 2)Item 3)Eat 4)Status 5)Exit")
-                choice = input("Choice (1-5): ").strip().lower()
-
-            if choice in ("1", "p", "proceed"):
-                break
-            if choice in ("2", "i", "item", "use"):
-                if not player.items:
-                    print("You have no items to use.")
-                    continue
-                print("Items:", ", ".join(i.name for i in player.items))
-                item_name = input("Which item do you want to use? ").strip()
-                if not item_name:
-                    continue
-                print(player.use_item(item_name, {"event": room["type"]}))
-                continue
-            if choice in ("3", "e", "eat"):
-                print(player.eat(10))
-                continue
-            if choice in ("4", "s", "status"):
-                print(player.status())
-                continue
-            if choice in ("5", "x", "exit"):
-                if attempt_exit(chamber):
-                    return
-                player.food = max(player.food - 10, 0)
-                player.take_damage(5, "Wandering in the dark")
-                print("You lose time and food as you stumble around.")
-                break
-            if room["type"] == "choice" and choice in ("6", "g", "go"):
-                # direction decision
-                dir_choice = input("Go left, right, or forward? (l/r/f): ").strip().lower()
-                if dir_choice.startswith("l"):
+                print("Choose: 1)Left 2)Right 3)Forward")
+                choice = input("> ").strip().lower()
+                
+                if choice in ("1", "l", "left"):
                     dmg = random.randint(15, 25)
-                    print("You head left and a hidden trap triggers!")
-                    print(player.take_damage(dmg, "Deadly trap"))
-                elif dir_choice.startswith("r"):
-                    print("A cursed pharaoh appears and he utters a terrible curse!")
+                    player.take_damage(dmg, "Trap")
+                    print(f"Trap! (-{dmg} HP)")
+                    break
+                elif choice in ("2", "r", "right"):
+                    dmg = random.randint(8, 15)
                     player.poisoned_turns += 10
-                    print("You feel a sickness take hold... (poisoned)")
+                    player.take_damage(dmg, "Curse")
+                    print(f"Ancient ghost pharaoh curses you! (-{dmg} HP, poisoned)")
+                    break
+                elif choice in ("3", "f", "forward"):
+                    print("Safe path.")
+                    break
                 else:
-                    print("You stumble forward into a safe alcove. You may choose again.")
-                    # restart the options loop without moving on
+                    print("Invalid.")
                     continue
-                # after resolving a bad choice, move on to next chamber automatically
-                break
+            
+            # Normal menu for other room types
+            else:
+                print("1)Proceed 2)Item 3)Eat 4)Status 5)Exit")
+                choice = input("> ").strip().lower()
 
-            print(f"Not a valid choice. Please enter {'1-6' if room['type']=='choice' else '1-5' }.")
+                if choice in ("1", "p", "proceed"):
+                    break
+                if choice in ("2", "i", "item", "use"):
+                    if not player.items:
+                        print("No items.")
+                        continue
+                    print("Items:", ", ".join(i.name for i in player.items))
+                    item_name = input("Use: ").strip()
+                    if not item_name:
+                        continue
+                    print(player.use_item(item_name, {"event": room["type"]}))
+                    continue
+                if choice in ("3", "e", "eat"):
+                    print(player.eat(1))
+                    continue
+                if choice in ("4", "s", "status"):
+                    print(player.status())
+                    continue
+                if choice in ("5", "x", "exit"):
+                    if attempt_exit(chamber):
+                        return
+                    player.food = max(player.food - 10, 0)
+                    player.take_damage(5, "Lost 5 HP")
+                    print("Lost in the dark.")
+                    break
+
+                print("Invalid.")
 
         if player.health <= 0:
             break
@@ -592,7 +626,7 @@ def run_temple_run(player: Player) -> None:
             else:
                 print(player.take_damage(room["damage"], "A trap triggers!"))
         elif room["type"] == "choice":
-            # direction choice already handled in menu; nothing extra
+            # choice already handled in menu
             pass
 
         elif room["type"] == "enemy":
@@ -648,13 +682,13 @@ def run_temple_run(player: Player) -> None:
             else:
                 print("The room is quiet. Nothing happens.")
 
-        # Food drains a bit after each chamber
-        player.food = max(player.food - 5, 0)
+        # Food drains more after each chamber
+        player.food = max(player.food - 8, 0)
         if player.food == 0:
             print("You are starving and feel weak...")
             player.take_damage(10, "Starvation")
-
-        print(player.status())
+            # show status only when starving
+            print(player.status())
 
     if player.health > 0 and chamber >= chambers:
         # reached final chamber; reward and require exit attempt
@@ -684,6 +718,10 @@ def main() -> None:
         chosen = choose_items(items, count=2)
         for item in chosen:
             player.add_item(item)
+        # always start with a medkit in addition to chosen items
+        medkit = next((i for i in build_default_items() if i.name=="Medkit"), None)
+        if medkit:
+            player.add_item(medkit)
 
         print("\nYour journey begins...")
         print(player.status())
