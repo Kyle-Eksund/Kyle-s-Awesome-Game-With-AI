@@ -691,16 +691,13 @@ def run_temple_run(player: Player) -> None:
             print(player.status())
 
     if player.health > 0 and chamber >= chambers:
-        # reached final chamber; reward and require exit attempt
+        # reached final chamber; reward and automatically find exit when you collect the treasure
         bonus = random.randint(2000, 5000)
         player.money += bonus
         print("\nYou reach the temple's heart and uncover a hoard of coins!")
         print(f"You collect {bonus} gold – you now have {player.money} money. This could change your life.")
-        print("Now to find your way out...")
-        if attempt_exit(chamber):
-            print("\nYou exit the temple, battered but alive. The legend lives on!")
-        else:
-            print("\nYou wander the corridors and barely escape with your life!")
+        print("As you pocket the treasure, a hidden passage opens and you find your way out.")
+        print("\nYou exit the temple, battered but alive. The legend lives on!")
     elif player.health > 0:
         print("\nYou left the temple and live to come back another day.")
     else:
